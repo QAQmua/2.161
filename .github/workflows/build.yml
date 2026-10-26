@@ -34,7 +34,7 @@ jobs:
           rm -rf AppSource
           mv "$TARGET_DIR" AppSource
 
-      - name: 3. 补全单层毛玻璃并自动优化 WidgetFanFolder 编译推导
+      - name: 3. 补全编译接口并精准修复 WidgetFanFolder 第474行超时
         run: |
           python3 -c '
           import os
@@ -128,26 +128,60 @@ jobs:
           with open("AppSource/IOS26MinimalShim.swift", "w") as f:
               f.write(shim_code)
 
-          # 3. 自动修复 WidgetFanFolder 编译推导超时
-          fan_folder_file = "AppSource/Widgets/WidgetFanFolder.swift"
-          if os.path.exists(fan_folder_file):
-              with open(fan_folder_file, "r", encoding="utf-8") as f:
-                  ff_code = f.read()
-              
-              old_zindex = """.zIndex(
-                        isFocused ? 999 : (
-                            isCenterElevated ? (idx == 2 ? 10 : Double(idx < 2 ? idx : (4 - idx)))
-                            : Double(4 - idx)
-                        )
-                    )"""
-              
-              if old_zindex in ff_code:
-                  ff_code = ff_code.replace(old_zindex, ".zIndex(isFocused ? 999.0 : (isCenterElevated ? (idx == 2 ? 10.0 : Double(idx < 2 ? idx : (4 - idx))) : Double(4 - idx)))")
-                  with open(fan_folder_file, "w", encoding="utf-8") as f:
-                      f.write(ff_code)
-                  print("✨ 已自动修复 WidgetFanFolder 编译推导式！")
+          # 3. 精准修复 WidgetFanFolder.swift 第 474 行 .fill(.ultraThinMaterial.opacity(0.55)) 泛型推导超时
+          for root, dirs, files in os.walk("AppSource"):
+              for file in files:
+                  if file == "WidgetFanFolder.swift":
+                      ff_path = os.path.join(root, file)
+                      with open(ff_path, "r", encoding="utf-8") as f:
+                          ff_code = f.read()
+                      
+                      # 修复第 474 行
+                      ff_code = ff_code.replace(
+                          ".fill(.ultraThinMaterial.opacity(0.55))",
+                          ".fill(.ultraThinMaterial).opacity(0.55)"
+                      )
+                      
+                      # 同时简化 folderFrontPocket 避免 overlay 链式推导超时
+                      old_pocket = """    private func folderFrontPocket(s: CGFloat) -> some View {
+        CleanFolderFrontShape()
+            .fill(Color.white.opacity(0.68))
+            .background(
+                CleanFolderFrontShape()
+                    .fill(.ultraThinMaterial).opacity(0.55)
+            )
+            .frame(width: 116 * s, height: 50 * s)
+            .overlay(
+                CleanFolderFrontShape()
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.95), Color.white.opacity(0.30)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.8 * s
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.04), radius: 5 * s, y: 2.5 * s)
+    }"""
+                      new_pocket = """    private func folderFrontPocket(s: CGFloat) -> some View {
+        let shape = CleanFolderFrontShape()
+        let grad = LinearGradient(colors: [Color.white.opacity(0.95), Color.white.opacity(0.30)], startPoint: .top, endPoint: .bottom)
+        return shape
+            .fill(Color.white.opacity(0.68))
+            .background(shape.fill(.ultraThinMaterial).opacity(0.55))
+            .frame(width: 116 * s, height: 50 * s)
+            .overlay(shape.stroke(grad, lineWidth: 0.8 * s))
+            .shadow(color: Color.black.opacity(0.04), radius: 5 * s, y: 2.5 * s)
+    }"""
+                      if old_pocket in ff_code:
+                          ff_code = ff_code.replace(old_pocket, new_pocket)
+
+                      with open(ff_path, "w", encoding="utf-8") as f:
+                          f.write(ff_code)
+                      print("✨ 已精准修复 WidgetFanFolder 第 474 行编译超时！")
           '
-          echo "✅ 配置完成！"
+          echo "✅ 预处理完成！"
 
       - name: 4. 编译并封装 IPA
         run: |
